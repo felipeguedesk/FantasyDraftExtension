@@ -97,8 +97,21 @@
       .slice(0, 60)
       .map(([k, v]) => ({ name: k, count: v.count, samples: v.samples }));
 
+  // This report is meant to be pasted into a chat or a bug report, and a draft
+  // room URL carries leagueId, teamId, and a memberId GUID that identifies the
+  // ESPN account. Only the path and the season are needed to interpret a probe.
+  const safeUrl = () => {
+    try {
+      const u = new URL(location.href);
+      const season = u.searchParams.get('seasonId');
+      return `${u.origin}${u.pathname}${season ? `?seasonId=${season}` : ''}`;
+    } catch {
+      return '(url unavailable)';
+    }
+  };
+
   const report = {
-    url: location.href,
+    url: safeUrl(),
     capturedAt: new Date().toISOString(),
     classes: summarize(classes),
     dataAttrs: summarize(dataAttrs),

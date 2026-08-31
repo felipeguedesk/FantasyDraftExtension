@@ -1,3 +1,7 @@
 .scratch/
 node_modules/
 *.log
+
+# Per-machine Claude Code state. launch.json is shareable project config and is
+# deliberately not ignored; settings.local.json is a personal permission list.
+.claude/settings.local.json
