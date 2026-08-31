@@ -1,0 +1,10 @@
+{
+  "name": "fantasy-draft-assistant",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Read-only advisory overlay for the ESPN fantasy football draft room.",
+  "scripts": {
+    "test": "node --test test/",
+    "replay": "node tools/replay.js"
+  }
+}

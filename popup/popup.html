@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Draft Assistant</h1>
+      <span class="tag">read-only</span>
+    </header>
+
+    <section id="detected" class="banner hidden">
+      <div class="banner-text">
+        Detected league <strong id="detected-id"></strong> in this tab.
+      </div>
+      <button id="detected-save" class="primary sm">Save</button>
+    </section>
+
+    <section>
+      <h2>Leagues</h2>
+      <ul id="league-list"></ul>
+      <p id="empty-note" class="muted hidden">
+        No leagues yet. Open a draft room and it saves automatically, or add one below.
+      </p>
+    </section>
+
+    <section>
+      <h2>Add league</h2>
+      <form id="add-form">
+        <div class="row">
+          <label for="league-id">League ID</label>
+          <input id="league-id" inputmode="numeric" pattern="\d+" placeholder="123456" required />
+        </div>
+        <div class="row">
+          <label for="season-id">Season</label>
+          <input id="season-id" inputmode="numeric" pattern="\d{4}" value="2026" required />
+        </div>
+        <div class="row">
+          <label for="label">Label</label>
+          <input id="label" placeholder="Work league (optional)" />
+        </div>
+        <button type="submit" class="primary">Add league</button>
+      </form>
+      <p class="muted hint">
+        Find the ID in the draft room URL: <code>?leagueId=<b>123456</b></code>
+      </p>
+    </section>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="../shared/config.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

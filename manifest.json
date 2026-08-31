@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "ESPN Fantasy Draft Assistant",
+  "version": "0.4.0",
+  "description": "Read-only advisory overlay for ESPN fantasy football drafts. Never drafts for you.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://fantasy.espn.com/*",
+    "https://lm-api-reads.fantasy.espn.com/*",
+    "https://sports.core.api.espn.com/*"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "ESPN Draft Assistant"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://fantasy.espn.com/*"],
+      "js": [
+        "shared/log.js",
+        "shared/config.js",
+        "shared/nfl-teams.js",
+        "shared/persist.js",
+        "content/espn-api.js",
+        "content/draft-state.js",
+        "content/selectors.js",
+        "content/dom-observer.js",
+        "engine/strategy.js",
+        "engine/scoring.js",
+        "engine/vor.js",
+        "engine/survival.js",
+        "engine/recommend.js",
+        "ui/panel.js",
+        "content/inject.js"
+      ],
+      "css": ["ui/panel.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
