@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ESPN Fantasy Draft Assistant",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "description": "Read-only advisory overlay for ESPN fantasy football drafts. Never drafts for you.",
   "permissions": ["storage"],
   "host_permissions": [

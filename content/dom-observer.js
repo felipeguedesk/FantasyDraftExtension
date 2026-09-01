@@ -158,14 +158,19 @@
 
   // Reads whichever representation the page is currently showing. Both are
   // tried because the board and the feed are separate tabs in ESPN's UI.
-  function readPicks(index, teamCount, entries) {
+  function readPicks(index, teamCount, entries, maxRound) {
     const raw = [];
 
     for (const el of entries || completedEntries()) {
       const parsed = S.classOf(el).toLowerCase().includes('pick-cell')
         ? parsePickCell(el)
         : parsePickMessage(el);
-      if (parsed) raw.push(parsed);
+      if (!parsed) continue;
+      // The board pre-renders every cell of the draft. One read out of a future
+      // round puts the counter past the end of the draft, which reads as "draft
+      // complete" and turns every recommendation into a panic pick.
+      if (maxRound && parsed.round > maxRound) continue;
+      raw.push(parsed);
     }
 
     const picks = [];
@@ -201,17 +206,42 @@
     return { picks, unmatched, scanned: raw.length };
   }
 
-  // "On the Clock: Pick 148" / "RND 13 of 17 00:30"
-  function readClock() {
-    const out = { currentPick: null, round: null, totalRounds: null, secondsLeft: null };
+  const PICK_ONLY = /^\s*(?:on\s*the\s*clock\s*:?\s*)?pick\s*#?\s*(\d+)\s*$/i;
+  const PICK_ANY = /pick\s*#?\s*(\d+)/i;
 
-    const clockEl = S.resolve('onTheClock');
-    if (clockEl) {
-      const t = S.textOf(clockEl);
-      const pick = /pick\s*#?\s*(\d+)/i.exec(t);
-      if (pick) out.currentPick = Number(pick[1]);
+  // The header sits the pick number directly beside the team name, so the
+  // container's textContent reads "ON THE CLOCK: PICK 772 Gurls 1 Kupp" when
+  // pick 77 belongs to "2 Gurls 1 Kupp". A number that swallowed part of a team
+  // name is worse than no number at all — it invents a drift of hundreds of
+  // picks — so it is only believed if it lands inside the round on screen.
+  function pickNumberIn(el, round, teamCount) {
+    const plausible = (n) =>
+      Number.isFinite(n) &&
+      n > 0 &&
+      (!round || !teamCount || (n > (round - 1) * teamCount && n <= round * teamCount));
+
+    // An element holding nothing but the pick phrase has no team name to run
+    // into, so it needs no guessing.
+    const descendants = el.querySelectorAll ? [...el.querySelectorAll('*')] : [];
+    for (const node of descendants.reverse()) {
+      const m = PICK_ONLY.exec(S.textOf(node));
+      if (m) return Number(m[1]);
     }
 
+    const whole = PICK_ONLY.exec(S.textOf(el)) || PICK_ANY.exec(S.textOf(el));
+    if (!whole) return null;
+
+    // Otherwise peel trailing digits back off until what is left fits the round.
+    let digits = whole[1];
+    while (digits && !plausible(Number(digits))) digits = digits.slice(0, -1);
+    return digits ? Number(digits) : null;
+  }
+
+  // "On the Clock: Pick 148" / "RND 13 of 17 00:30"
+  function readClock(teamCount) {
+    const out = { currentPick: null, round: null, totalRounds: null, secondsLeft: null };
+
+    // Round first: it is what makes the pick number checkable.
     const timerEl = S.resolve('clock');
     if (timerEl) {
       const t = S.textOf(timerEl);
@@ -223,6 +253,9 @@
       const time = /(\d{1,2}):(\d{2})/.exec(t);
       if (time) out.secondsLeft = Number(time[1]) * 60 + Number(time[2]);
     }
+
+    const clockEl = S.resolve('onTheClock');
+    if (clockEl) out.currentPick = pickNumberIn(clockEl, out.round, teamCount);
 
     return out;
   }
@@ -253,7 +286,9 @@
 
       const index = runtime.getIndex();
       const teamCount = runtime.getTeamCount ? runtime.getTeamCount() : 0;
-      const { picks, unmatched, scanned } = readPicks(index, teamCount, entries);
+      const { picks, unmatched, scanned } = readPicks(
+        index, teamCount, entries, readClock(teamCount).round
+      );
 
       runtime.unmatched = unmatched;
       runtime.lastError = null;
@@ -338,6 +373,7 @@
     matchPlayer,
     parsePickMessage,
     parsePickCell,
+    pickNumberIn,
     completedEntries,
     readPicks,
     readClock,

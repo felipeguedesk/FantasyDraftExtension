@@ -185,14 +185,34 @@
     return { teams, raw };
   }
 
+  // mDraftDetail is only reliably populated once a draft is over. While one is
+  // running it can hand back nothing but placeholder slots, so the same request
+  // also pulls the rosters, which fill in live. Both come from one round trip
+  // because this runs on the polling loop.
   async function fetchDraftDetail(seasonId, leagueId) {
-    const raw = await request(leagueUrl(seasonId, leagueId, ['mDraftDetail']));
+    const raw = await request(
+      leagueUrl(seasonId, leagueId, ['mDraftDetail', 'mTeam', 'mRoster'])
+    );
     const detail = obj(obj(raw).draftDetail);
+
+    const rosters = arr(obj(raw).teams).map((t) => {
+      const team = obj(t);
+      return {
+        teamId: int(team.id, 0),
+        playerIds: arr(obj(obj(team.roster)).entries)
+          .map((e) => int(obj(e).playerId))
+          .filter((x) => x !== null && x > 0)
+      };
+    });
+    // ESPN returns a slot for every pick in the draft, not just the ones that
+    // have happened: unmade picks come back with playerId -1 and a real team,
+    // round and overall number. Taking them at face value makes an untouched
+    // draft look finished, so a pick counts only once it names a player.
     const picks = arr(detail.picks)
       .map((x) => {
         const pick = obj(x);
         const playerId = int(pick.playerId);
-        if (playerId === null) return null;
+        if (playerId === null || playerId <= 0) return null;
         return {
           playerId,
           teamId: int(pick.teamId, 0),
@@ -209,6 +229,7 @@
       inProgress: bool(detail.inProgress, false),
       drafted: bool(detail.drafted, false),
       picks,
+      rosters,
       raw
     };
   }

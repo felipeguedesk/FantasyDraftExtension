@@ -73,6 +73,9 @@
       picks: [],
       draftedPlayerIds: new Set(),
       rostersByTeam: new Map(),
+      // ESPN's own clock, when it is the only thing that knows where the draft
+      // is. Null whenever the API can answer that question itself.
+      observedPick: null,
       lastSyncAt: null,
       source: 'none'
     };
@@ -123,16 +126,24 @@
     return { added, removed };
   }
 
-  // Counting picks is only correct when none are missing. The DOM layer drops
-  // picks it cannot match to a player, so it can hand over a list with holes in
-  // it — and a pick counter that reads low points at the wrong turn. The highest
-  // overall actually seen survives that; for API data the two agree exactly.
+  // Counting picks is only right when none are missing, and the DOM layer sees
+  // whatever the page has rendered — often a window of recent picks with high
+  // overall numbers and nothing before them. So the highest pick seen wins over
+  // the number of them. Implausible coordinates are rejected upstream, where
+  // the round on the clock is known to reject them against.
   function currentOverallPick(state) {
+    const count = state.picks.length;
     let highest = 0;
     for (const pick of state.picks) {
       if (pick.overall > highest) highest = pick.overall;
     }
-    return Math.max(state.picks.length, highest) + 1;
+    const counted = Math.max(count, highest) + 1;
+
+    // Counting only works if we saw the picks. During a live draft ESPN's API
+    // reports nothing at all, so the board is the only record and it shows just
+    // what is currently rendered. The clock on screen still knows where the
+    // draft is, and it can only move the counter forward.
+    return state.observedPick > counted ? state.observedPick : counted;
   }
 
   function nextPickForMe(state) {

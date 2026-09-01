@@ -131,3 +131,33 @@ test('a gapped pick list still reports the right pick on the clock', () => {
   assert.strictEqual(DS.currentOverallPick(state), 9);
   assert.strictEqual(DS.picksUntilMyTurn(state), 9); // my next is 18
 });
+
+test("ESPN's own clock carries the counter when the API reports no picks", () => {
+  const settings = makeSettings({ teamCount: 10 });
+  const state = makeState({ settings, myTeamId: 103 });
+
+  // A live draft: the API knows nothing, and the board only rendered the last
+  // few picks, so the panel has matched 4 of the 62 that have happened.
+  DS.applyPicks(
+    state,
+    [55, 56, 57, 58].map((overall) => ({
+      playerId: overall * 10,
+      teamId: DS.teamAtPick(state.pickOrder, overall),
+      round: 6,
+      roundPick: overall - 50,
+      overall,
+      keeper: false,
+      autoDraft: false
+    })),
+    'dom'
+  );
+
+  assert.strictEqual(DS.currentOverallPick(state), 59);
+  state.observedPick = 63;
+  assert.strictEqual(DS.currentOverallPick(state), 63);
+
+  // It only ever moves the counter forward — a clock reading behind what we
+  // have actually seen is the stale one.
+  state.observedPick = 12;
+  assert.strictEqual(DS.currentOverallPick(state), 59);
+});

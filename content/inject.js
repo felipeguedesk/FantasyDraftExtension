@@ -25,6 +25,10 @@
     stopped: false,
     lastError: null,
     loggedPickShape: false,
+    // ESPN's read API returns nothing but placeholder picks while a draft is
+    // running, so for that whole window the DOM is the only record there is.
+    apiBlind: false,
+    loggedApiBlind: false,
     notice: null,
     playerIndex: null,
     domEnabled: false,
@@ -151,8 +155,14 @@
   // so a cached reading could be minutes old and invent drift that is not there.
   function driftPicks() {
     if (!runtime.state || !runtime.domEnabled) return null;
-    runtime.domClock = FDADomObserver.readClock();
-    if (!runtime.domClock.currentPick) return null;
+    runtime.domClock = FDADomObserver.readClock(runtime.state.teamCount);
+
+    // With no API to disagree with, the clock is not a cross-check — it is the
+    // only thing that knows where the draft is, so it drives the counter and
+    // there is no drift left to report.
+    runtime.state.observedPick = runtime.apiBlind ? runtime.domClock.currentPick : null;
+
+    if (!runtime.domClock.currentPick || runtime.apiBlind) return null;
     return runtime.domClock.currentPick - FDADraftState.currentOverallPick(runtime.state);
   }
 
@@ -172,10 +182,14 @@
         `${FDADraftState.currentOverallPick(runtime.state)} — ${Math.abs(drift)} pick(s) out of sync.`;
     }
 
+    const blind = runtime.apiBlind && !runtime.lastError && !stale;
+
     return {
-      api: runtime.lastError ? 'down' : stale ? 'stale' : 'ok',
-      apiStatus: runtime.lastError ? 'bad' : stale ? 'warn' : 'ok',
-      apiDetail: runtime.lastError || '',
+      api: runtime.lastError ? 'down' : stale ? 'stale' : blind ? 'blind' : 'ok',
+      apiStatus: runtime.lastError ? 'bad' : stale || blind ? 'warn' : 'ok',
+      apiDetail:
+        runtime.lastError ||
+        (blind ? 'ESPN publishes no picks while a draft runs — the board is the source' : ''),
       dom: dom.status === 'ok' ? 'ok' : dom.status,
       domStatus: dom.status === 'ok' ? 'ok' : dom.status === 'bad' ? 'bad' : 'warn',
       domDetail: dom.detail,
@@ -185,9 +199,10 @@
     };
   }
 
-  // The DOM sees a pick a beat before mDraftDetail does. Anything it reports is
-  // provisional: the next API sync overwrites it wholesale, so a false positive
-  // costs at most one poll interval of a wrong name being greyed out.
+  // The DOM sees a pick a beat before mDraftDetail does, and during a live
+  // draft it sees them when nothing else does. A false positive is corrected by
+  // the first API sync that carries real picks — which, for a draft in
+  // progress, means once it is over.
   function onDomPicks(domPicks) {
     if (!runtime.state) return;
     const state = runtime.state;
@@ -267,13 +282,26 @@
         ? `Out of sync with ESPN by ${Math.abs(drift)} picks — check the board before you pick.`
         : null;
 
+    // When the API is blind we know where the draft is but only who was taken
+    // while the board was on screen. Naming that gap is the honest thing to do,
+    // and unlike the drift banner it comes with something to act on.
+    const unseen =
+      runtime.apiBlind && runtime.state
+        ? FDADraftState.currentOverallPick(runtime.state) - 1 - runtime.state.picks.length
+        : 0;
+
     FDAPanel.update({
       recommendation,
       slotCounts: runtime.settings ? runtime.settings.slotCounts : {},
       totalRounds: runtime.state ? runtime.state.totalRounds : 0,
       health: health(drift),
       notice: runtime.notice,
-      warning: driftNotice
+      warning:
+        driftNotice ||
+        (unseen >= DRIFT_TOLERANCE
+          ? `${unseen} earlier picks aren't visible to the panel — open ESPN's Board tab once ` +
+            `so it can read them, or some players listed below are already gone.`
+          : null)
     });
   }
 
@@ -340,6 +368,31 @@
     if (picks.length) FDADraftState.applyPicks(runtime.state, picks, 'manual');
   }
 
+  // Rosters say who a team has, never in what order it took them — ESPN sorts
+  // them by lineup slot. So a team's nth roster player is filed against that
+  // team's nth pick, which puts the draft at the right depth and every player
+  // on the right team, but gets the order within a team wrong. That is the
+  // whole cost of being able to see a live draft at all.
+  function picksFromRosters(state, rosters) {
+    const picks = [];
+    for (const { teamId, playerIds } of rosters || []) {
+      const slot = state.pickOrder.indexOf(teamId) + 1;
+      if (!slot) continue;
+      playerIds.forEach((playerId, i) => {
+        picks.push({
+          playerId,
+          teamId,
+          round: i + 1,
+          roundPick: 0,
+          overall: FDADraftState.overallForRound(state.pickOrder, slot, i + 1),
+          keeper: false,
+          autoDraft: false
+        });
+      });
+    }
+    return picks;
+  }
+
   async function syncPicks() {
     if (runtime.stopped) return;
     try {
@@ -348,14 +401,33 @@
         runtime.league.leagueId
       );
 
-      if (!runtime.loggedPickShape && detail.picks.length) {
-        // mDraftDetail's pick shape could not be confirmed against a public
-        // league; dump the first real one so it can be verified in a mock.
-        log('First parsed pick (verify shape):', detail.picks[0]);
-        runtime.loggedPickShape = true;
+      // Whichever source knows about more picks is the one telling the truth:
+      // mDraftDetail wins once the draft is over and carries real pick order,
+      // rosters win while it is running.
+      const fromRosters = picksFromRosters(runtime.state, detail.rosters);
+      const picks = detail.picks.length >= fromRosters.length ? detail.picks : fromRosters;
+
+      // lm-api-reads is a replica that does not materialise a draft until it is
+      // finished: mid-draft it returns a placeholder slot for every pick and an
+      // empty roster for every team. Applied as authoritative it erases every
+      // pick the DOM observer found, on every poll, for the entire draft.
+      runtime.apiBlind = detail.inProgress && !picks.length;
+      let delta = { added: [], removed: [] };
+
+      if (runtime.apiBlind) {
+        if (!runtime.loggedApiBlind) {
+          warn('ESPN reports the draft in progress but has no picks — reading the board instead.');
+          runtime.loggedApiBlind = true;
+        }
+        runtime.state.lastSyncAt = Date.now();
+      } else {
+        if (!runtime.loggedPickShape && picks.length) {
+          log('First parsed pick (verify shape):', picks[0]);
+          runtime.loggedPickShape = true;
+        }
+        delta = FDADraftState.applyPicks(runtime.state, picks, 'api');
       }
 
-      const delta = FDADraftState.applyPicks(runtime.state, detail.picks, 'api');
       applyManualPicks();
       if (delta.added.length || delta.removed.length || runtime.backoffMs) {
         logState(delta);

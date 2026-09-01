@@ -179,3 +179,50 @@ test('a pick for a player outside the pool is reported, not silently dropped', (
     globalThis.FDASelectors.resolveAll = originalResolveAll;
   }
 });
+
+test('a pick number running into the team name does not invent drift', () => {
+  // "ON THE CLOCK: PICK 77" beside "2 Gurls 1 Kupp" concatenates to 772, which
+  // read at face value put the panel 771 picks out of sync in a live draft.
+  const header = new El('current-pick-module-container', 'ON THE CLOCK: PICK 772 Gurls 1 Kupp');
+  assert.equal(DOM.pickNumberIn(header, 7, 12), 77);
+});
+
+test('a pick number in its own element is read without guessing', () => {
+  const header = new El('current-pick-module-container', '', [
+    new El('current-pick__label', 'ON THE CLOCK: PICK 77'),
+    new El('current-pick__team', '2 Gurls 1 Kupp')
+  ]);
+  assert.equal(DOM.pickNumberIn(header, 7, 12), 77);
+});
+
+test('a pick number is trimmed to what the round allows, or left null', () => {
+  const header = new El('current-pick-module-container', 'ON THE CLOCK: PICK 999 Whatever');
+  assert.equal(DOM.pickNumberIn(header, 1, 12), 9);
+  assert.equal(DOM.pickNumberIn(new El('x', 'Drafting...'), 7, 12), null);
+});
+
+test('a cell from a future round is not read as a completed pick', () => {
+  // The board pre-renders all 204 cells of a 12x17 draft. One read out of the
+  // last of them put the panel at "pick 205" during a live round 2.
+  const cell = (round, roundPick, first, last, team, pos) =>
+    new El('draft-board-grid-pick-cell', '', [
+      new El('pickCell__roundPick', `${round}.${roundPick}`),
+      new El('pickCell__playerFirstName', first),
+      new El('pickCell__playerLastName', last),
+      new El('pickCell__playerProTeam', team),
+      new El('pickCell__playerPosition', pos)
+    ]);
+
+  const entries = [
+    cell(1, 1, 'Puka', 'Nacua', 'LAR', 'WR'),
+    cell(17, 12, 'Tyreek', 'Hill', 'MIA', 'WR')
+  ];
+
+  // Round 2 is on the clock, so the round-17 cell cannot be a pick that happened.
+  const { picks } = DOM.readPicks(index, 12, entries, 2);
+  assert.equal(picks.length, 1);
+  assert.equal(picks[0].overall, 1);
+
+  // With no round known, nothing is rejected.
+  assert.equal(DOM.readPicks(index, 12, entries, null).picks.length, 2);
+});

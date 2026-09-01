@@ -14,7 +14,7 @@ anything in the ESPN UI. It only reads.
 | Phase | Scope | State |
 |-------|-------|-------|
 | **1** | Read-only sync — detect draft room, pull settings + player pool, poll picks. League config UI. | **Done — needs mock-draft verification** |
-| **2** | Recommendation engine + replay harness. Scoring, VOR, tiers, survival, strategy weights. | **Done — 69 unit tests pass** |
+| **2** | Recommendation engine + replay harness. Scoring, VOR, tiers, survival, strategy weights. | **Done — 74 unit tests pass** |
 | **3** | On-page panel rendering the top 5 live. | **Done — needs mock-draft verification** |
 | **4** | Hardening — DOM observation, degraded modes, log buffer, injury narrative. | **Done — needs mock-draft verification** |
 | 5 | Tuning `engine/strategy.js` constants against replayed drafts. | Not started |
@@ -25,7 +25,7 @@ with the `−` button; both stick across reloads. Console logging from phase 1 i
 ### Running the tests and the replay
 
 ```bash
-npm test          # 69 unit tests, no dependencies — uses node:test
+npm test          # 74 unit tests, no dependencies — uses node:test
 npm run replay    # replays a synthetic draft, printing the top 5 at each of your turns
 ```
 
@@ -121,16 +121,27 @@ Open the console (F12) and filter for `[FDA]` to see the underlying sync:
 - [ ] The panel's pick counter matches the draft room's own clock
 - [ ] Top 5 never contains a kicker before the final round, or a defense before the last two
 
-### The one unverified assumption
+### Where picks actually come from
 
-`mDraftDetail`'s pick array shape could **not** be confirmed against live data — public
-league defaults return no draft object. The field names in
-[`content/espn-api.js`](content/espn-api.js) (`roundId`, `roundPickNumber`,
-`overallPickNumber`) are the expected ones, but unproven.
+`mDraftDetail` returns a slot for **every** pick in the draft, not just the ones that have
+happened — unmade picks come back with `playerId: -1` and a real team, round and overall
+number. And during a live draft it may return nothing but those placeholders, never filling
+in the picks that have already been made.
 
-`inject.js` logs the first parsed pick specifically so this can be checked. If `round`,
-`roundPick`, or `overall` come back as `0`, the field names are wrong and need correcting.
-Report what that line prints.
+So picks are read from two places in the same request:
+
+| Source | When it wins | What it gives up |
+|---|---|---|
+| `mDraftDetail.picks` (`playerId > 0`) | Draft is over; more picks than the rosters show | Empty or placeholder-only while a draft runs |
+| `teams[].roster.entries` | A live draft — whenever it knows about more picks | Sorted by lineup slot, so pick **order within a team** is approximated |
+
+Whichever knows about more picks is believed. The roster path gets every player onto the
+right team and the draft to the right depth, which is what the recommendations need; only
+the ordering inside a team is a guess.
+
+`inject.js` logs the first parsed pick so the field names (`roundId`, `roundPickNumber`,
+`overallPickNumber`) can be checked. If `round`, `roundPick`, or `overall` come back as `0`,
+report what that line prints.
 
 ---
 
@@ -234,6 +245,13 @@ it disagrees with our pick count by two or more, the panel says so in a banner a
 turn bar — recommending confidently for the wrong turn is the worst way for this to fail,
 and it is not something to leave in a tooltip nobody hovers on a 30-second clock.
 
+That header is also the one place a naive read is actively dangerous: the pick number sits
+directly beside the team name, so `PICK 77` next to `2 Gurls 1 Kupp` reads as pick **772**
+if you take the container's text. The number is therefore read from a child element holding
+nothing else where possible, and otherwise trimmed until it falls inside the round the page
+is showing. A number that cannot be made plausible is discarded — a missing drift check is
+much cheaper than a fabricated one.
+
 The class names ESPN ships are styled-jsx build hashes (`jsx-553213854`) that change on
 every deploy, so nothing depends on them. `content/selectors.js` tries `data-testid` hooks
 first, then the stable human-readable class fragments, then text matching, and reports which
@@ -267,10 +285,11 @@ ui/
   panel.js/.css        the overlay — renders a view model, emits intent callbacks
 popup/
   popup.html/.js/.css  league configuration UI
-test/                  69 unit tests + the shared harness
+test/                  74 unit tests + the shared harness
 tools/
   replay.js            replays a draft, printing the top 5 at each of your turns
   dom-probe.js         paste into the draft room console to re-check ESPN's markup
+  api-probe.js         paste into the draft room console to see where ESPN is putting picks
 ```
 
 Vanilla JS, no build step, no framework — it has to be debuggable at speed on draft day.
